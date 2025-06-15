@@ -1,3 +1,7 @@
+import psycopg2
+from psycopg2 import OperationalError, sql
+from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
+from src.bd_sql.config import DB_NAME, DB_USER, DB_PASSWORD
 from src.api import HHVacancyAPI
 from src.storage import (
     JSONVacancyStorage,
@@ -7,7 +11,7 @@ from src.storage import (
 )
 from src.managers import VacancyManager
 import os
-
+from src.bd_sql.db import *
 
 def user_interaction() -> None:
     """Функция для взаимодействия с пользователем."""
@@ -24,13 +28,17 @@ def user_interaction() -> None:
     print("2. CSV")
     print("3. Excel")
     print("4. TXT")
-    storage_choice = input("Введите номер варианта (1-4): ")
+    print("5. PostgreSQL Database")
+
+    storage_choice = input("Введите номер варианта (1-5): ")
+
 
     storage_map = {
         "1": ("JSON", os.path.join(data_dir, "vacancies.json")),
         "2": ("CSV", os.path.join(data_dir, "vacancies.csv")),
         "3": ("Excel", os.path.join(data_dir, "vacancies.xlsx")),
         "4": ("TXT", os.path.join(data_dir, "vacancies.txt")),
+        "5": ("PostgreSQL", None),  # Для БД не нужен файл
     }
 
     if storage_choice not in storage_map:
@@ -59,9 +67,13 @@ def _create_storage(storage_type: str, file_path: str):
         "JSON": JSONVacancyStorage,
         "CSV": CSVVacancyStorage,
         "Excel": ExcelVacancyStorage,
-        "TXT": TXTVacancyStorage
+        "TXT": TXTVacancyStorage,
+        "PostgreSQL": lambda _: DatabaseVacancyStorage(
+            db_name=DB_NAME,
+            user=DB_USER,
+            password=DB_PASSWORD
+        )
     }
-
     storage_class = storage_classes.get(storage_type, JSONVacancyStorage)
     return storage_class(file_path)
 
@@ -146,6 +158,11 @@ def _truncate_text(text: str, max_length: int) -> str:
     if len(text) <= max_length:
         return text
     return text[:max_length] + "..."
+
+# Параметры подключения (лучше вынести в конфиг или переменные окружения)
+db_name = "hh_vacancies"  # Имя вашей новой базы данных
+db_user = "postgres"
+db_password = "1q2w3e4r5t"  # Замените на реальный пароль
 
 
 if __name__ == "__main__":
