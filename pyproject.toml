@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "pythonproject-2-search-for-vacancies"
+name = "pythonproject-3-search-for-vacancies_BD"
 version = "0.1.0"
 description = ""
 authors = ["Андрей Стюхин <andreyst@olovyannaya.ru>"]
@@ -8,6 +8,9 @@ readme = "README.md"
 [tool.poetry.dependencies]
 python = "^3.13"
 python-dotenv = "^1.1.0"
+psycopg2-binary = "^2.9.10"
+requests = "*"
+openpyxl = "^3.1.5"
 
 
 [build-system]
