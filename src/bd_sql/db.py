@@ -121,3 +121,22 @@ class DatabaseVacancyStorage:
             with conn.cursor() as cursor:
                 cursor.execute("TRUNCATE TABLE vacancies")
                 conn.commit()
+
+    def add_employer(self, employer, employer_id):
+        """Добавляет работодателя в БД"""
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                vacancy_id = employer.get("id")
+                name = employer.get("name")
+
+                cursor.execute("""
+                    INSERT INTO employers (
+                        id, hh_id, name
+                    ) VALUES (%s, %s, %s)
+                    ON CONFLICT (hh_id)
+                    DO UPDATE SET
+                        name = EXCLUDED.name,
+                        
+                """, (
+                    employer_id, vacancy_id, name
+                ))
