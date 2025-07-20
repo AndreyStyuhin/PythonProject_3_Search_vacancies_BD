@@ -3,7 +3,7 @@ import json
 import os
 import time
 import requests
-from src.bd_sql.db import DatabaseVacancyStorage
+from db import DatabaseVacancyStorage
 
 # ✅ Список компаний
 COMPANIES = [

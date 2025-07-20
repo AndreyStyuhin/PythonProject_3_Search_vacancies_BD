@@ -1,47 +1,39 @@
 import requests
-import time  # импортируем модуль time
+import json
+import os
 from db import DatabaseVacancyStorage
+
+# Подключение к БД
 a = DatabaseVacancyStorage("hh_vacancies", "postgres", "1q2w3e4r5t", "127.0.0.1")
 
-# companies = [
-#     "Альфа-Банк",
-#     "ВТБ",
-#    "X5 Group",
-#    "Газпромбанк",
-#    "Газпром нефть",
-#    "Яндекс",
-#     "Ozon",
-#     "Аэрофлот",
-#     "МТС",
-#     "Сбер",
-#     "Иви",
-#     "AGIMA",
-#     "RealWeb"
-# ]
-companies = [9694561, 2180]
+# ✅ Загружаем IDs компаний из JSON
+file_path = "company_ids.json"
+if not os.path.exists(file_path):
+    raise FileNotFoundError(f"Файл {file_path} не найден. Сначала запусти get_employers_id.py")
 
-def get_employer_date (id):
-    base_url = f"https://api.hh.ru/employers/{id}"
-    response = requests.get(base_url)
-    return response.json()
+with open(file_path, "r", encoding="utf-8") as f:
+    company_ids = json.load(f)
 
-for e in companies:
-    employer = get_employer_date(e)
-    a.add_employer(employer, 1)
+companies = [int(cid) for cid in company_ids.values() if cid is not None]
 
-# company_ids = {}
-#
-# for company in companies:
-#     response = requests.get(base_url, params={"text": company, "per_page": 1})
-#     data = response.json()
-#
-#     if data.get("items"):
-#         employer = data["items"][0]
-#         company_ids[company] = employer["id"]
-#     else:
-#         company_ids[company] = None
-#
-#     # Пауза в 0.5 секунды
-#     time.sleep(0.5)
+def get_employer_data(emp_id):
+    """Запрашивает данные о работодателе по ID"""
+    try:
+        response = requests.get(f"https://api.hh.ru/employers/{emp_id}", timeout=10)
+        response.raise_for_status()
+        return response.json()
+    except requests.RequestException as e:
+        print(f"Ошибка при запросе ID {emp_id}: {e}")
+        return None
 
-# print(company_ids)
+# ✅ Сохраняем работодателей в БД
+for emp_id in companies:
+    employer = get_employer_data(emp_id)
+    if employer:
+        try:
+            a.add_employer(employer, source_id=1)
+            print(f"✅ Добавлен: {employer.get('name')} (ID {emp_id})")
+        except Exception as db_error:
+            print(f"Ошибка при добавлении работодателя {emp_id}: {db_error}")
+    else:
+        print(f"Пропущен ID {emp_id} из-за ошибки запроса")
