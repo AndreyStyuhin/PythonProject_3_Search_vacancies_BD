@@ -1,169 +1,159 @@
-import psycopg2
-from psycopg2 import OperationalError, sql
-from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
-from src.bd_sql.config import DB_NAME, DB_USER, DB_PASSWORD
-from src.api import HHVacancyAPI
-from src.storage import (
-    JSONVacancyStorage,
-    CSVVacancyStorage,
-    ExcelVacancyStorage,
-    TXTVacancyStorage
-)
-from src.managers import VacancyManager
+import json
 import os
-from src.bd_sql.db import *
+import time
+import requests
+from src.bd_sql.db import DatabaseVacancyStorage
 
-def user_interaction() -> None:
-    """Функция для взаимодействия с пользователем."""
-    print("Добро пожаловать в программу для работы с вакансиями hh.ru!")
-
-    # Создаем папку data, если её нет
-    data_dir = "data"
-    if not os.path.exists(data_dir):
-        os.makedirs(data_dir)
-
-    # Выбор хранилища
-    print("\nВыберите формат для сохранения вакансий:")
-    print("1. JSON")
-    print("2. CSV")
-    print("3. Excel")
-    print("4. TXT")
-    print("5. PostgreSQL Database")
-
-    storage_choice = input("Введите номер варианта (1-5): ")
-
-
-    storage_map = {
-        "1": ("JSON", os.path.join(data_dir, "vacancies.json")),
-        "2": ("CSV", os.path.join(data_dir, "vacancies.csv")),
-        "3": ("Excel", os.path.join(data_dir, "vacancies.xlsx")),
-        "4": ("TXT", os.path.join(data_dir, "vacancies.txt")),
-        "5": ("PostgreSQL", None),  # Для БД не нужен файл
-    }
-
-    if storage_choice not in storage_map:
-        print("Неверный выбор. Используется JSON по умолчанию.")
-        storage_choice = "1"
-
-    storage_type, file_path = storage_map[storage_choice]
-    print(f"Используется {storage_type} хранилище: {file_path}")
-
-    # Создание экземпляров API и хранилища
-    api = HHVacancyAPI()
-
-    # Создание хранилища в зависимости от выбора пользователя
-    storage = _create_storage(storage_type, file_path)
-
-    # Создание менеджера вакансий
-    manager = VacancyManager(api, storage)
-
-    # Основной цикл взаимодействия с пользователем
-    _main_menu_loop(manager)
+# --- Константы ---
+COMPANIES = [
+    "Альфа-Банк",
+    "ВТБ",
+    "X5 Group",
+    "Газпромбанк",
+    "Газпром нефть",
+    "Яндекс",
+    "Ozon",
+    "Аэрофлот",
+    "МТС",
+    "Сбер",
+    "Иви",
+    "AGIMA",
+    "RealWeb"
+]
+BASE_URL = "https://api.hh.ru/employers"
+JSON_FILE = "company_ids.json"
 
 
-def _create_storage(storage_type: str, file_path: str):
-    """Создает экземпляр хранилища в зависимости от типа."""
-    storage_classes = {
-        "JSON": JSONVacancyStorage,
-        "CSV": CSVVacancyStorage,
-        "Excel": ExcelVacancyStorage,
-        "TXT": TXTVacancyStorage,
-        "PostgreSQL": lambda _: DatabaseVacancyStorage(
-            db_name=DB_NAME,
-            user=DB_USER,
-            password=DB_PASSWORD
-        )
-    }
-    storage_class = storage_classes.get(storage_type, JSONVacancyStorage)
-    return storage_class(file_path)
+# --- Базовые функции работы с БД ---
+def get_db():
+    return DatabaseVacancyStorage("hh_vacancies", "postgres", "1q2w3e4r5t", "127.0.0.1")
 
 
-def _main_menu_loop(manager: VacancyManager) -> None:
-    """Основной цикл меню программы."""
-    while True:
-        _display_menu()
-        choice = input("Выберите действие (1-4): ")
+# --- HH API методы ---
+def get_company_ids():
+    """Получает ID работодателей по именам и сохраняет в JSON"""
+    company_ids = {}
+    for company in COMPANIES:
+        try:
+            response = requests.get(BASE_URL, params={"text": company, "per_page": 1}, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            if data.get("items"):
+                employer = data["items"][0]
+                company_ids[company] = employer["id"]
+            else:
+                company_ids[company] = None
+            print(f"{company}: {company_ids[company]}")
+        except requests.RequestException as e:
+            print(f"Ошибка при запросе {company}: {e}")
+            company_ids[company] = None
+        time.sleep(1)
 
-        if choice == "1":
-            _handle_search_vacancies(manager)
-        elif choice == "2":
-            _handle_top_vacancies(manager)
-        elif choice == "3":
-            _handle_keyword_search(manager)
-        elif choice == "4":
-            print("До свидания!")
-            break
-        else:
-            print("Неверный выбор. Пожалуйста, введите число от 1 до 4.")
-
-
-def _display_menu() -> None:
-    """Отображает главное меню."""
-    print("\nМеню:")
-    print("1. Поиск вакансий на hh.ru")
-    print("2. Показать топ N вакансий по зарплате")
-    print("3. Поиск вакансий по ключевому слову в описании")
-    print("4. Выход")
+    with open(JSON_FILE, "w", encoding="utf-8") as f:
+        json.dump(company_ids, f, ensure_ascii=False, indent=4)
+    print(f"✅ Сохранено в {JSON_FILE}")
 
 
-def _handle_search_vacancies(manager: VacancyManager) -> None:
-    """Обрабатывает поиск и сохранение вакансий."""
-    search_query = input("Введите поисковый запрос (например: Python разработчик): ")
-    try:
-        manager.fetch_and_store_vacancies(search_query)
-        print(f"Вакансии по запросу '{search_query}' успешно сохранены.")
-    except Exception as e:
-        print(f"Ошибка при получении вакансий: {e}")
-
-
-def _handle_top_vacancies(manager: VacancyManager) -> None:
-    """Обрабатывает показ топ вакансий по зарплате."""
-    try:
-        n = int(input("Введите количество вакансий для отображения (N): "))
-        top_vacancies = manager.get_top_vacancies_by_salary(n)
-        _display_vacancies(top_vacancies, f"Топ {n} вакансий по зарплате")
-    except ValueError:
-        print("Пожалуйста, введите корректное число.")
-
-
-def _handle_keyword_search(manager: VacancyManager) -> None:
-    """Обрабатывает поиск вакансий по ключевому слову."""
-    keyword = input("Введите ключевое слово для поиска в описании: ")
-    vacancies = manager.get_vacancies_with_keyword(keyword)
-    _display_vacancies(vacancies, f"Найдено {len(vacancies)} вакансий с ключевым словом '{keyword}'")
-
-
-def _display_vacancies(vacancies, title: str) -> None:
-    """Отображает список вакансий."""
-    print(f"\n{title}:")
-
-    if not vacancies:
-        print("Вакансии не найдены.")
+def save_employers_to_db():
+    """Загружает работодателей по ID из JSON в БД"""
+    if not os.path.exists(JSON_FILE):
+        print(f"Файл {JSON_FILE} не найден! Сначала выполните пункт 6 (получение ID работодателей).")
         return
 
-    for i, vacancy in enumerate(vacancies, 1):
-        salary = vacancy.get_salary()
-        salary_str = f"{salary} RUB" if salary else "Зарплата не указана"
+    with open(JSON_FILE, "r", encoding="utf-8") as f:
+        company_ids = json.load(f)
 
-        print(f"{i}. {vacancy.title}")
-        print(f"   Ссылка: {vacancy.link}")
-        print(f"   Зарплата: {salary_str}")
-        print(f"   Описание: {_truncate_text(vacancy.description, 100)}")
-        print(f"   Требования: {_truncate_text(vacancy.requirements, 100)}")
-        print()
+    companies = [int(cid) for cid in company_ids.values() if cid]
+    db = get_db()
+
+    for emp_id in companies:
+        try:
+            response = requests.get(f"https://api.hh.ru/employers/{emp_id}", timeout=10)
+            response.raise_for_status()
+            employer = response.json()
+            db.add_employer(employer, source_id=1)
+            print(f"✅ Добавлен: {employer.get('name')} (ID {emp_id})")
+        except requests.RequestException as e:
+            print(f"Ошибка при запросе ID {emp_id}: {e}")
+        except Exception as db_error:
+            print(f"Ошибка при добавлении работодателя {emp_id}: {db_error}")
 
 
-def _truncate_text(text: str, max_length: int) -> str:
-    """Обрезает текст до указанной длины."""
-    if len(text) <= max_length:
-        return text
-    return text[:max_length] + "..."
+# --- Отчеты из БД ---
+def show_companies_and_counts():
+    db = get_db()
+    data = db.get_companies_and_vacancies_count()
+    print("\nКомпании и количество вакансий:")
+    for company, count in data:
+        print(f"{company}: {count}")
 
-# Параметры подключения (лучше вынести в конфиг или переменные окружения)
-db_name = "hh_vacancies"  # Имя вашей новой базы данных
-db_user = "postgres"
-db_password = "1q2w3e4r5t"  # Замените на реальный пароль
+
+def show_all_vacancies():
+    db = get_db()
+    vacancies = db.get_all_vacancies()
+    for v in vacancies:
+        print(f"{v[0]} | {v[1]} | {v[2]}-{v[3]} {v[4]}")
+
+
+def show_avg_salary():
+    db = get_db()
+    avg = db.get_avg_salary()
+    print(f"\nСредняя зарплата: {avg if avg else 'Нет данных'}")
+
+
+def show_vacancies_above_avg():
+    db = get_db()
+    vacancies = db.get_vacancies_with_higher_salary()
+    for v in vacancies:
+        print(f"{v[0]} | {v[1]} | {v[2]}-{v[3]} {v[4]}")
+
+
+def show_vacancies_by_keyword():
+    keyword = input("Введите ключевое слово: ")
+    db = get_db()
+    vacancies = db.get_vacancies_with_keyword(keyword)
+    for v in vacancies:
+        print(f"{v[0]} | {v[1]} | {v[2]}-{v[3]} {v[4]}")
+
+
+# --- Главное меню ---
+def _display_menu():
+    print("\nМеню:")
+    print("1. Показать компании и количество их вакансий")
+    print("2. Показать все вакансии")
+    print("3. Показать среднюю зарплату по всем вакансиям")
+    print("4. Показать вакансии с зарплатой выше средней")
+    print("5. Найти вакансии по ключевому слову")
+    print("6. Получить ID работодателей и сохранить в JSON")
+    print("7. Загрузить работодателей в БД")
+    print("8. Выход")
+
+
+def main():
+    while True:
+        _display_menu()
+        choice = input("Выберите действие (1-8): ")
+
+        if choice == "1":
+            show_companies_and_counts()
+        elif choice == "2":
+            show_all_vacancies()
+        elif choice == "3":
+            show_avg_salary()
+        elif choice == "4":
+            show_vacancies_above_avg()
+        elif choice == "5":
+            show_vacancies_by_keyword()
+        elif choice == "6":
+            get_company_ids()
+        elif choice == "7":
+            save_employers_to_db()
+        elif choice == "8":
+            print("Выход...")
+            break
+        else:
+            print("Неверный выбор. Пожалуйста, введите число от 1 до 8.")
 
 
 if __name__ == "__main__":
-    user_interaction()
+    main()
