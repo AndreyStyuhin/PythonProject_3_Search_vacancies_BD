@@ -3,6 +3,7 @@ import os
 import time
 import requests
 from src.bd_sql.db import DatabaseVacancyStorage
+from src.models.vacancy import Vacancy
 
 # --- Константы ---
 COMPANIES = [
@@ -79,6 +80,100 @@ def save_employers_to_db():
             print(f"Ошибка при добавлении работодателя {emp_id}: {db_error}")
 
 
+def get_vacancies_for_employer(emp_id):
+    """Получает все вакансии работодателя по API HH"""
+    vacancies = []
+    page = 0
+    while True:
+        try:
+            response = requests.get(
+                "https://api.hh.ru/vacancies",
+                params={"employer_id": emp_id, "page": page, "per_page": 100},
+                timeout=10
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            for item in data.get("items", []):
+                vacancy = Vacancy(
+                    hh_id=item.get("id"),
+                    title=item.get("name"),
+                    link=item.get("alternate_url"),
+                    salary=item.get("salary"),
+                    description=item.get("snippet", {}).get("responsibility"),
+                    requirements=item.get("snippet", {}).get("requirement")
+                )
+                vacancies.append(vacancy)
+
+            if page >= data.get("pages", 1) - 1:
+                break
+            page += 1
+            time.sleep(0.3)  # Пауза, чтобы не попасть под блокировку API
+
+        except requests.RequestException as e:
+            print(f"Ошибка при загрузке вакансий для {emp_id}: {e}")
+            break
+
+    return vacancies
+
+
+def save_vacancies_by_multiple_companies():
+    """Добавляет вакансии в БД для выбранных или всех компаний из JSON"""
+    if not os.path.exists(JSON_FILE):
+        print(f"Файл {JSON_FILE} не найден! Сначала выполните пункт 6 (получение ID работодателей).")
+        return
+
+    # Загружаем список компаний
+    with open(JSON_FILE, "r", encoding="utf-8") as f:
+        companies = json.load(f)
+
+    # Выводим меню выбора компании
+    print("\nВыберите компании (через запятую) или '*' для всех:")
+    company_list = list(companies.keys())
+    for idx, name in enumerate(company_list, 1):
+        print(f"{idx}. {name}")
+
+    choice = input("Введите номера компаний или *: ").strip()
+
+    # Если *
+    if choice == "*":
+        selected_indexes = list(range(1, len(company_list) + 1))
+    else:
+        selected_indexes = [int(c.strip()) for c in choice.split(",") if c.strip().isdigit()]
+
+    if not selected_indexes:
+        print("Неверный ввод!")
+        return
+
+    db = get_db()
+    total_vacancies = 0
+
+    for idx in selected_indexes:
+        if idx < 1 or idx > len(company_list):
+            print(f"Пропущен неверный номер: {idx}")
+            continue
+
+        selected_company = company_list[idx - 1]
+        emp_id = companies[selected_company]
+        print(f"\n▶ Загружаем вакансии для {selected_company} (ID {emp_id})")
+
+        vacancies = get_vacancies_for_employer(emp_id)
+        print(f"   Найдено вакансий: {len(vacancies)}")
+
+        count = 0
+        for vac in vacancies:
+            try:
+                db.add_vacancy(vac)
+                count += 1
+            except Exception as e:
+                print(f"   ❌ Ошибка добавления вакансии {vac.title}: {e}")
+
+        total_vacancies += count
+        print(f"   ✅ Загружено {count} вакансий для {selected_company}")
+
+    print(f"\n✅ Всего добавлено вакансий: {total_vacancies}")
+
+
 # --- Отчеты из БД ---
 def show_companies_and_counts():
     db = get_db()
@@ -126,13 +221,14 @@ def _display_menu():
     print("5. Найти вакансии по ключевому слову")
     print("6. Получить ID работодателей и сохранить в JSON")
     print("7. Загрузить работодателей в БД")
-    print("8. Выход")
+    print("8. Загрузить вакансии для выбранных компаний (или всех)")
+    print("9. Выход")
 
 
 def main():
     while True:
         _display_menu()
-        choice = input("Выберите действие (1-8): ")
+        choice = input("Выберите действие (1-9): ")
 
         if choice == "1":
             show_companies_and_counts()
@@ -149,10 +245,12 @@ def main():
         elif choice == "7":
             save_employers_to_db()
         elif choice == "8":
+            save_vacancies_by_multiple_companies()
+        elif choice == "9":
             print("Выход...")
             break
         else:
-            print("Неверный выбор. Пожалуйста, введите число от 1 до 8.")
+            print("Неверный выбор. Пожалуйста, введите число от 1 до 9.")
 
 
 if __name__ == "__main__":
