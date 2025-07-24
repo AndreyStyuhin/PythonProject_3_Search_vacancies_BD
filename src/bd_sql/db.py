@@ -43,6 +43,15 @@ class DatabaseVacancyStorage:
         """Создает таблицы и добавляет недостающие колонки"""
         with self._connect() as conn:
             with conn.cursor() as cursor:
+                # Таблица работодателей
+                cursor.execute("""
+                                    CREATE TABLE IF NOT EXISTS employers (
+                                        id SERIAL PRIMARY KEY,
+                                        hh_id VARCHAR(50) UNIQUE NOT NULL,
+                                        name VARCHAR(255) NOT NULL,
+                                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                                    )
+                                """)
                 # Таблица вакансий
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS vacancies (
@@ -59,15 +68,7 @@ class DatabaseVacancyStorage:
                     )
                 """)
 
-                # Таблица работодателей
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS employers (
-                        id SERIAL PRIMARY KEY,
-                        hh_id VARCHAR(50) UNIQUE NOT NULL,
-                        name VARCHAR(255) NOT NULL,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    )
-                """)
+
 
                 # Добавляем колонку source_id, если её нет
                 cursor.execute("""
