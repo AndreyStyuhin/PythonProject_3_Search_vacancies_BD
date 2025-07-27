@@ -1,6 +1,6 @@
 import psycopg2
 from psycopg2 import sql
-from typing import List, Optional
+from typing import List
 from src.models.vacancy import Vacancy
 
 
@@ -45,14 +45,15 @@ class DatabaseVacancyStorage:
             with conn.cursor() as cursor:
                 # Таблица работодателей
                 cursor.execute("""
-                                    CREATE TABLE IF NOT EXISTS employers (
-                                        id SERIAL PRIMARY KEY,
-                                        hh_id VARCHAR(50) UNIQUE NOT NULL,
-                                        name VARCHAR(255) NOT NULL,
-                                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                                    )
-                                """)
-                # Таблица вакансий
+                    CREATE TABLE IF NOT EXISTS employers (
+                        id SERIAL PRIMARY KEY,
+                        hh_id VARCHAR(50) UNIQUE NOT NULL,
+                        name VARCHAR(255) NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+
+                # Таблица вакансий с внешним ключом employer_id
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS vacancies (
                         id SERIAL PRIMARY KEY,
@@ -64,30 +65,15 @@ class DatabaseVacancyStorage:
                         currency VARCHAR(10),
                         description TEXT,
                         requirements TEXT,
+                        employer_id INTEGER REFERENCES employers(id) ON DELETE CASCADE,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
-                """)
-
-
-
-                # Добавляем колонку source_id, если её нет
-                cursor.execute("""
-                    DO $$
-                    BEGIN
-                        IF NOT EXISTS (
-                            SELECT 1 FROM information_schema.columns
-                            WHERE table_name='employers' AND column_name='source_id'
-                        ) THEN
-                            ALTER TABLE employers ADD COLUMN source_id INTEGER NOT NULL DEFAULT 1;
-                        END IF;
-                    END
-                    $$;
                 """)
                 conn.commit()
 
     # ------------------- Методы для работы с данными -------------------
 
-    def add_employer(self, employer: dict, source_id: int):
+    def add_employer(self, employer: dict, source_id: int = 1):
         """Добавляет работодателя в БД"""
         with self._connect() as conn:
             with conn.cursor() as cursor:
@@ -97,27 +83,35 @@ class DatabaseVacancyStorage:
                     print("Пропущен работодатель: нет hh_id или name")
                     return
                 cursor.execute("""
-                    INSERT INTO employers (hh_id, name, source_id)
-                    VALUES (%s, %s, %s)
+                    INSERT INTO employers (hh_id, name)
+                    VALUES (%s, %s)
                     ON CONFLICT (hh_id)
                     DO UPDATE SET
-                        name = EXCLUDED.name,
-                        source_id = EXCLUDED.source_id
-                """, (hh_id, name, source_id))
+                        name = EXCLUDED.name
+                """, (hh_id, name))
             conn.commit()
 
     def add_vacancy(self, vacancy: Vacancy):
-        """Добавляет вакансию в БД"""
+        """Добавляет вакансию в БД с учетом employer_id"""
         with self._connect() as conn:
             with conn.cursor() as cursor:
                 salary_from = vacancy.salary.get('from') if vacancy.salary else None
                 salary_to = vacancy.salary.get('to') if vacancy.salary else None
                 currency = vacancy.salary.get('currency') if vacancy.salary else None
+
+                # Находим employer_id по hh_id работодателя
+                cursor.execute("SELECT id FROM employers WHERE hh_id = %s", (vacancy.employer_hh_id,))
+                employer_row = cursor.fetchone()
+                if not employer_row:
+                    print(f"⚠ Работодатель {vacancy.employer_hh_id} не найден. Сначала добавь его.")
+                    return
+                employer_id = employer_row[0]
+
                 cursor.execute("""
                     INSERT INTO vacancies (
                         hh_id, title, link, salary_from, salary_to, 
-                        currency, description, requirements
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        currency, description, requirements, employer_id
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (hh_id)
                     DO UPDATE SET
                         title = EXCLUDED.title,
@@ -126,7 +120,8 @@ class DatabaseVacancyStorage:
                         salary_to = EXCLUDED.salary_to,
                         currency = EXCLUDED.currency,
                         description = EXCLUDED.description,
-                        requirements = EXCLUDED.requirements
+                        requirements = EXCLUDED.requirements,
+                        employer_id = EXCLUDED.employer_id
                 """, (
                     vacancy.hh_id,
                     vacancy.title,
@@ -135,7 +130,8 @@ class DatabaseVacancyStorage:
                     salary_to,
                     currency,
                     vacancy.description,
-                    vacancy.requirements
+                    vacancy.requirements,
+                    employer_id
                 ))
             conn.commit()
 
@@ -148,7 +144,7 @@ class DatabaseVacancyStorage:
                 cursor.execute("""
                     SELECT e.name, COUNT(v.id)
                     FROM employers e
-                    LEFT JOIN vacancies v ON e.hh_id = v.hh_id
+                    LEFT JOIN vacancies v ON e.id = v.employer_id
                     GROUP BY e.name
                     ORDER BY COUNT(v.id) DESC
                 """)
