@@ -27,7 +27,7 @@ JSON_FILE = "company_ids.json"
 
 # --- Базовые функции работы с БД ---
 def get_db():
-    return DatabaseVacancyStorage("hh_vacancies", "postgres", "1q2w3e4r5t", "127.0.0.1")
+    return DatabaseVacancyStorage("hh_vacancies", "stayer", "1q2w3e4r5t", "127.0.0.1")
 
 
 # --- HH API методы ---
@@ -100,15 +100,16 @@ def get_vacancies_for_employer(emp_id):
                     title=item.get("name"),
                     link=item.get("alternate_url"),
                     salary=item.get("salary"),
-                    description=item.get("snippet", {}).get("responsibility"),
-                    requirements=item.get("snippet", {}).get("requirement")
+                    description=item.get("snippet", {}).get("responsibility", ""),
+                    requirements=item.get("snippet", {}).get("requirement", ""),
+                    employer_hh_id=item.get("employer", {}).get("id")  # ✅ добавлено
                 )
                 vacancies.append(vacancy)
 
             if page >= data.get("pages", 1) - 1:
                 break
             page += 1
-            time.sleep(0.3)  # Пауза, чтобы не попасть под блокировку API
+            time.sleep(0.3)  # Пауза для API
 
         except requests.RequestException as e:
             print(f"Ошибка при загрузке вакансий для {emp_id}: {e}")
